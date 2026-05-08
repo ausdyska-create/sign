@@ -6,51 +6,82 @@
     <title>전자서명 제출</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }
-        canvas { touch-action: none; cursor: crosshair; background-color: white; -webkit-tap-highlight-color: transparent; }
+        /* 모바일 터치 최적화 및 스크롤 방지 */
+        html, body { 
+            position: fixed; 
+            overflow: hidden; 
+            width: 100%; 
+            height: 100%; 
+            touch-action: none; 
+            -webkit-user-select: none;
+            user-select: none;
+            overscroll-behavior: none;
+        }
+        canvas { 
+            touch-action: none; 
+            cursor: crosshair; 
+            background-color: white;
+            -webkit-tap-highlight-color: transparent;
+        }
+        input::placeholder {
+            color: #cbd5e1;
+        }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen flex flex-col items-center p-4">
-    <div class="w-full max-w-md bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-200 mt-6">
+<body class="bg-slate-50 flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200">
+        <!-- 서버 연결 상태 표시 -->
         <div id="connection-status" class="bg-slate-100 px-4 py-2 text-[10px] font-bold text-slate-400 flex items-center justify-center gap-2">
-            <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-300"></span>
+            <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-300 transition-colors"></span>
             <span id="status-text">서버 연결 확인 중...</span>
         </div>
+
         <div class="p-8 pb-4 text-center">
-            <h1 class="text-2xl font-black text-slate-800 tracking-tight">전자서명 제출</h1>
+            <h1 class="text-2xl font-black text-slate-800 tracking-tight leading-tight">전자서명</h1>
             <p class="text-slate-500 mt-2 font-medium">성함을 입력하고 아래 칸에 서명해 주세요</p>
         </div>
-        <div class="px-8 pb-8 space-y-6">
+
+        <div class="px-8 pb-8 space-y-5">
+            <!-- 작성자 성명 입력란 -->
             <div>
-                <label class="block text-xs font-bold text-slate-400 mb-2 uppercase ml-1">작성자 성명</label>
-                <input type="text" id="user-name" placeholder="예: 홍길동" class="w-full px-5 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 rounded-2xl outline-none transition-all font-semibold text-slate-700 shadow-inner">
+                <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase ml-1 tracking-wider">작성자 성명</label>
+                <input type="text" id="user-name" placeholder="예: 홍길동" 
+                    class="w-full px-5 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none transition-all font-bold text-slate-700 shadow-inner">
             </div>
-            <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-2xl border-2 border-slate-100 overflow-hidden shadow-inner">
+
+            <!-- 서명 캔버스 -->
+            <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-3xl border-2 border-slate-100 overflow-hidden shadow-inner">
                 <canvas id="signature-pad" class="w-full h-full"></canvas>
-                <div class="absolute bottom-10 left-6 right-6 border-b border-slate-200 pointer-events-none"></div>
+                <!-- 서명 가이드 라인 -->
+                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
             </div>
-            <div class="flex justify-between items-center px-1">
-                <div class="flex gap-3">
-                    <button onclick="setPenColor('#000000')" id="color-black" class="w-8 h-8 rounded-full bg-black ring-2 ring-offset-2 ring-black"></button>
-                    <button onclick="setPenColor('#2563eb')" id="color-blue" class="w-8 h-8 rounded-full bg-blue-600"></button>
-                </div>
-                <button id="clear-btn" class="text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors">전체 지우기</button>
+
+            <!-- 하단 버튼 레이아웃: 왼쪽(지우기), 오른쪽(제출) -->
+            <div class="grid grid-cols-2 gap-3">
+                <button id="clear-btn" class="py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-all text-sm">
+                    전체 지우기
+                </button>
+                <button id="submit-btn" disabled class="py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 disabled:shadow-none transition-all flex justify-center items-center gap-2 text-sm">
+                    <span id="btn-text">제출하기</span>
+                    <div id="loader" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                </button>
             </div>
-            <button id="submit-btn" disabled class="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-300 transition-all flex justify-center items-center gap-3">
-                <span id="btn-text">서명 제출하기</span>
-                <div id="loader" class="hidden w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            </button>
         </div>
     </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase 설정 (환경 변수 사용)
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'sign-collector';
+
         const canvas = document.getElementById('signature-pad');
         const container = document.getElementById('canvas-container');
         const ctx = canvas.getContext('2d');
@@ -60,54 +91,132 @@
         const btnText = document.getElementById('btn-text');
         const statusText = document.getElementById('status-text');
         const statusDot = document.getElementById('status-dot');
-        let isDrawing = false, lastX = 0, lastY = 0, currentColor = '#000000';
+        
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+
+        // 인증 로직 (RULE 3 준수)
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth Error:", error);
+                statusText.textContent = "연결 오류 (재접속 필요)";
+                statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
+            }
+        };
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                statusText.textContent = "서버 연결됨 (제출 가능)";
+                statusText.textContent = "서버 연결됨";
                 statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
                 submitBtn.disabled = false;
-            } else { signInAnonymously(auth); }
+            } else {
+                initAuth();
+            }
         });
+
+        // 캔버스 크기 및 드로잉 설정
         function resize() {
             const r = window.devicePixelRatio || 1;
             canvas.width = container.offsetWidth * r;
             canvas.height = container.offsetHeight * r;
             ctx.scale(r, r);
-            ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = currentColor;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#000000';
         }
-        window.addEventListener('load', resize); window.addEventListener('resize', resize);
-        window.setPenColor = (c) => { currentColor = c; ctx.strokeStyle = c; };
+        window.addEventListener('load', resize);
+        window.addEventListener('resize', resize);
+
         const getPos = (e) => {
             const rect = canvas.getBoundingClientRect();
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
             const cy = e.touches ? e.touches[0].clientY : e.clientY;
             return { x: cx - rect.left, y: cy - rect.top };
         };
-        canvas.addEventListener('touchstart', (e) => { isDrawing = true; const p = getPos(e); [lastX, lastY] = [p.x, p.y]; }, {passive: false});
-        canvas.addEventListener('touchmove', (e) => { if (!isDrawing) return; if (e.cancelable) e.preventDefault(); const p = getPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); [lastX, lastY] = [p.x, p.y]; }, {passive: false});
-        window.addEventListener('touchend', () => isDrawing = false);
-        canvas.addEventListener('mousedown', (e) => { isDrawing = true; const p = getPos(e); [lastX, lastY] = [p.x, p.y]; });
-        canvas.addEventListener('mousemove', (e) => { if (!isDrawing) return; const p = getPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); [lastX, lastY] = [p.x, p.y]; });
-        window.addEventListener('mouseup', () => isDrawing = false);
+
+        const start = (e) => {
+            isDrawing = true;
+            const p = getPos(e);
+            [lastX, lastY] = [p.x, p.y];
+        };
+
+        const draw = (e) => {
+            if (!isDrawing) return;
+            if (e.cancelable) e.preventDefault(); // 모바일 스크롤 방지
+            const p = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+            [lastX, lastY] = [p.x, p.y];
+        };
+
+        const stop = () => isDrawing = false;
+
+        // 터치 및 마우스 이벤트 통합
+        canvas.addEventListener('touchstart', start, {passive: false});
+        canvas.addEventListener('touchmove', draw, {passive: false});
+        canvas.addEventListener('touchend', stop);
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', draw);
+        window.addEventListener('mouseup', stop);
+
+        // 지우기 기능
         document.getElementById('clear-btn').onclick = () => ctx.clearRect(0,0,canvas.width,canvas.height);
+
+        // 제출 처리
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
-            if(!name) return alert("성함을 입력해주세요.");
-            const blank = document.createElement('canvas'); blank.width = canvas.width; blank.height = canvas.height;
-            if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 그려주세요.");
+            if (!name) return alert("성함을 입력해 주세요.");
+
+            const blank = document.createElement('canvas');
+            blank.width = canvas.width; blank.height = canvas.height;
+            // 캔버스가 비어있는지 체크
+            if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 먼저 그려주세요.");
+
+            if (!auth.currentUser) return alert("연결 중입니다. 잠시만 기다려주세요.");
+
             setLoading(true);
+
             try {
                 const dataURL = canvas.toDataURL('image/png');
+                
+                // Firestore 업로드
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
-                    name, image: dataURL, timestamp: serverTimestamp(), uid: auth.currentUser.uid
+                    name: name,
+                    image: dataURL,
+                    timestamp: serverTimestamp(),
+                    uid: auth.currentUser.uid
                 });
-                const link = document.createElement('a'); link.download = `서명_${name}.png`; link.href = dataURL; link.click();
-                alert("제출 완료!"); ctx.clearRect(0,0,canvas.width,canvas.height); userNameInput.value = "";
-            } catch (e) { alert("제출 실패"); } finally { setLoading(false); }
+
+                // 스마트폰에 파일로 즉시 저장 (이름 포함)
+                const link = document.createElement('a');
+                link.download = `서명_${name}.png`;
+                link.href = dataURL;
+                link.click();
+
+                alert("성공적으로 제출되었습니다!");
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                userNameInput.value = "";
+            } catch (e) {
+                console.error(e);
+                alert("제출 실패: " + e.message);
+            } finally {
+                setLoading(false);
+            }
         };
+
         function setLoading(isLoading) {
-            submitBtn.disabled = isLoading; loader.classList.toggle('hidden', !isLoading);
-            btnText.textContent = isLoading ? "제출 중..." : "서명 제출하기";
+            submitBtn.disabled = isLoading;
+            loader.classList.toggle('hidden', !isLoading);
+            btnText.textContent = isLoading ? "중..." : "제출하기";
         }
     </script>
 </body>
