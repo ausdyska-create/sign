@@ -7,27 +7,33 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .sig-card:hover .delete-btn { opacity: 1; }
-        /* 터치 장치에서 스크롤 최적화 */
         body { overscroll-behavior-y: contain; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
+
+    <!-- 상단 내비게이션 -->
     <nav class="bg-white border-b border-slate-200 sticky top-0 z-10 px-6 py-4 flex justify-between items-center shadow-sm">
         <h1 class="text-xl font-black text-slate-800 flex items-center gap-2">
-            <span>📋</span> 서명 수집 관리
+            <span>📋</span> 서명 수집 현황
         </h1>
-        <div id="count-badge" class="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-bold">0건 수집됨</div>
+        <div id="count-badge" class="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-bold tracking-tight">0건 수집됨</div>
     </nav>
 
-    <main class="max-w-6xl mx-auto p-6">
+    <main class="max-w-6xl mx-auto p-6 sm:p-10">
+        <!-- 상단 컨트롤러 -->
         <div class="flex flex-col sm:flex-row gap-4 mb-10">
-            <input type="text" id="search-input" placeholder="이름으로 검색..." class="flex-1 px-6 py-4 rounded-2xl border-none shadow-md outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium">
-            <button id="download-all-btn" class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all active:scale-95">모든 이미지 다운로드</button>
+            <input type="text" id="search-input" placeholder="이름으로 검색..." 
+                class="flex-1 px-6 py-4 rounded-2xl border-none shadow-md focus:ring-2 focus:ring-indigo-500 outline-none font-medium transition-all">
+            <button id="download-all-btn" class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+                모든 서명 이미지 내려받기
+            </button>
         </div>
 
-        <div id="signature-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            <div id="status-area" class="col-span-full py-20 text-slate-400 text-center font-medium">
-                서버에 연결하는 중입니다...
+        <!-- 서명 목록 그리드 -->
+        <div id="signature-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 text-center">
+            <div id="status-area" class="col-span-full py-20 text-slate-400 font-medium">
+                서버 연결 및 데이터를 불러오는 중입니다...
             </div>
         </div>
     </main>
@@ -37,7 +43,7 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, query, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 환경 설정 로드
+        // Firebase 초기 설정
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -47,7 +53,7 @@
         let allData = [];
         let unsubscribe = null;
 
-        // 인증 로직 강화 (RULE 3 준수)
+        // 인증 처리 (보안 오류 방지)
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -56,30 +62,25 @@
                     await signInAnonymously(auth);
                 }
             } catch (error) {
-                console.error("인증 실패:", error);
-                document.getElementById('status-area').textContent = "인증에 실패했습니다. 페이지를 새로고침 해주세요.";
+                console.error("Auth Error:", error);
+                document.getElementById('status-area').textContent = "인증 오류가 발생했습니다. 권한 설정을 확인해주세요.";
             }
         };
 
-        // 초기 인증 실행
-        initAuth();
-
-        // 인증 상태 변화 감지 후 데이터 리스너 설정
+        // 인증 상태 확인 후 데이터 감시 시작
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                console.log("인증 완료:", user.uid);
                 startListening();
             } else {
-                console.log("인증 대기 중...");
+                initAuth();
             }
         });
 
-        // 실시간 리스너 설정 (RULE 1, 2 준수)
+        // 실시간 데이터 감시 함수
         function startListening() {
             if (unsubscribe) unsubscribe();
 
-            const signaturesRef = collection(db, 'artifacts', appId, 'public', 'data', 'signatures');
-            const q = query(signaturesRef); // 복합 쿼리 지양
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'));
 
             unsubscribe = onSnapshot(q, (snap) => {
                 allData = [];
@@ -87,41 +88,41 @@
                     allData.push({ id: d.id, ...d.data() });
                 });
                 
-                // 자바스크립트 메모리에서 정렬 처리 (인덱스 에러 방지)
+                // 최신 제출순으로 정렬
                 allData.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 
                 render();
             }, (error) => {
-                console.error("데이터 수신 오류:", error);
+                console.error("Firestore Error:", error);
                 if (error.code === 'permission-denied') {
-                    document.getElementById('status-area').textContent = "데이터 접근 권한이 없습니다. 다시 시도합니다...";
-                    initAuth(); // 권한 거부 시 재인증 시도
+                    document.getElementById('status-area').textContent = "접근 권한이 없습니다. 관리자 로그인이 필요합니다.";
                 }
             });
         }
 
+        // 화면 렌더링 함수
         function render() {
             const grid = document.getElementById('signature-grid');
             const search = document.getElementById('search-input').value.toLowerCase();
-            const filtered = allData.filter(d => d.name.toLowerCase().includes(search));
+            const filtered = allData.filter(d => (d.name || "").toLowerCase().includes(search));
             
             document.getElementById('count-badge').textContent = `${filtered.length}건 수집됨`;
 
             if (allData.length === 0) {
-                grid.innerHTML = `<div class="col-span-full py-20 text-center text-slate-400 font-medium">아직 제출된 서명이 없습니다.</div>`;
+                grid.innerHTML = `<div class="col-span-full py-20 text-slate-400 font-medium">아직 제출된 서명이 없습니다.</div>`;
                 return;
             }
 
             if (filtered.length === 0) {
-                grid.innerHTML = `<div class="col-span-full py-20 text-center text-slate-400 font-medium text-sm">검색 결과가 없습니다.</div>`;
+                grid.innerHTML = `<div class="col-span-full py-20 text-slate-400 font-medium">검색 결과가 없습니다.</div>`;
                 return;
             }
 
             grid.innerHTML = filtered.map(d => `
-                <div class="sig-card bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl transition-all relative group overflow-hidden">
+                <div class="sig-card bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-xl transition-all relative group overflow-hidden">
                     <div class="flex justify-between items-center mb-4 text-left">
                         <div>
-                            <span class="font-black text-slate-800 text-lg block leading-tight">${d.name}</span>
+                            <span class="font-black text-slate-800 text-lg block leading-tight">${d.name || '이름 없음'}</span>
                             <span class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">${formatDate(d.timestamp)}</span>
                         </div>
                         <button onclick="deleteDocById('${d.id}')" class="delete-btn opacity-0 text-slate-300 hover:text-rose-500 transition-all p-2 rounded-full hover:bg-rose-50">
@@ -131,45 +132,48 @@
                         </button>
                     </div>
                     <div class="bg-slate-50 rounded-2xl p-4 aspect-video flex items-center justify-center border border-slate-50 mb-4 overflow-hidden shadow-inner">
-                        <img src="${d.image}" class="max-w-full max-h-full object-contain drop-shadow-sm" loading="lazy" alt="${d.name} 서명">
+                        <img src="${d.image}" class="max-w-full max-h-full object-contain drop-shadow-sm" loading="lazy" alt="서명">
                     </div>
-                    <a href="${d.image}" download="${d.name}_서명.png" class="inline-block w-full py-3 bg-slate-100 text-slate-500 hover:bg-indigo-600 hover:text-white rounded-xl text-xs font-black transition-all text-center">
-                        이미지 개별 다운로드
+                    <a href="${d.image}" download="서명_${d.name || '알수없음'}.png" class="inline-block w-full py-3 bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl text-xs font-black transition-all text-center">
+                        파일 개별 저장
                     </a>
                 </div>
             `).join('');
         }
 
+        // 날짜 변환
         function formatDate(ts) {
             if (!ts) return "-";
             const date = ts.toDate();
             return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
+        // 데이터 삭제 기능
         window.deleteDocById = async (id) => {
-            if (!confirm("이 서명 데이터를 정말 삭제하시겠습니까?")) return;
+            if (!confirm("이 데이터를 영구적으로 삭제하시겠습니까?")) return;
             try {
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'signatures', id));
             } catch (e) {
-                console.error("삭제 중 오류:", e);
-                alert("삭제 권한이 없거나 오류가 발생했습니다.");
+                alert("삭제 권한이 없습니다.");
             }
         };
 
+        // 전체 다운로드 기능 (이름 포함)
         document.getElementById('download-all-btn').onclick = () => {
             if (allData.length === 0) return alert("다운로드할 데이터가 없습니다.");
-            if (!confirm(`${allData.length}개의 파일을 일괄 다운로드하시겠습니까?\n브라우저의 다중 다운로드 권한을 허용해야 합니다.`)) return;
+            if (!confirm(`${allData.length}개의 파일을 일괄 다운로드하시겠습니까?\n브라우저의 다중 다운로드 권한을 허용해주세요.`)) return;
 
             allData.forEach((d, i) => {
                 setTimeout(() => {
                     const a = document.createElement('a');
                     a.href = d.image;
-                    a.download = `${d.name}_서명.png`;
+                    a.download = `서명_${d.name || i+1}.png`;
                     a.click();
-                }, i * 350); // 브라우저 차단 방지를 위한 시간차
+                }, i * 350); 
             });
         };
 
+        // 이름 검색 필터링
         document.getElementById('search-input').oninput = render;
     </script>
 </body>
