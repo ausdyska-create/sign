@@ -122,6 +122,7 @@
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4;
             ctx.strokeStyle = '#000000';
+            ctx.fillStyle = '#000000';
         }
 
         window.addEventListener('load', resize);
@@ -129,25 +130,31 @@
 
         const getPos = (e) => {
             const rect = canvas.getBoundingClientRect();
-            const cx = e.touches ? e.touches[0].clientX : e.clientX;
-            const cy = e.touches ? e.touches[0].clientY : e.clientY;
-            return { x: cx - rect.left, y: cy - rect.top };
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
         };
 
-        const start = (e) => {
+        // Pointer Events 통합 핸들러 (모바일/PC 공용)
+        const handlePointerDown = (e) => {
+            // 캔버스 자체의 터치 동작 방지
+            if (e.pointerType === 'touch') canvas.style.touchAction = 'none';
+            
             isDrawing = true;
             resetCtxStyles();
             const p = getPos(e);
             [lastX, lastY] = [p.x, p.y];
             
+            // 점 찍기
             ctx.beginPath();
             ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
             ctx.fill();
         };
 
-        const draw = (e) => {
+        const handlePointerMove = (e) => {
             if (!isDrawing) return;
-            if (e.cancelable) e.preventDefault(); // 스크롤 방지
+            
             const p = getPos(e);
             ctx.beginPath();
             ctx.moveTo(lastX, lastY);
@@ -156,15 +163,15 @@
             [lastX, lastY] = [p.x, p.y];
         };
 
-        const stop = () => isDrawing = false;
+        const handlePointerUp = () => {
+            isDrawing = false;
+        };
 
-        // 터치 및 마우스 이벤트 연결
-        canvas.addEventListener('touchstart', start, { passive: false });
-        canvas.addEventListener('touchmove', draw, { passive: false });
-        canvas.addEventListener('touchend', stop);
-        canvas.addEventListener('mousedown', start);
-        canvas.addEventListener('mousemove', draw);
-        window.addEventListener('mouseup', stop);
+        // Pointer Events 연결 (가장 강력한 터치 지원)
+        canvas.addEventListener('pointerdown', handlePointerDown);
+        canvas.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
 
         document.getElementById('clear-btn').onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
 
