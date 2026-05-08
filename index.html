@@ -22,6 +22,7 @@
             cursor: crosshair; 
             background-color: white;
             -webkit-tap-highlight-color: transparent;
+            display: block;
         }
         input::placeholder {
             color: #cbd5e1;
@@ -72,10 +73,10 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase 설정 (환경 변수 사용)
+        // Firebase 설정 로드
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -95,42 +96,34 @@
         let isDrawing = false;
         let lastX = 0, lastY = 0;
 
-        // 인증 로직 (RULE 3 준수)
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Auth Error:", error);
-                statusText.textContent = "연결 오류 (재접속 필요)";
-                statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
-            }
-        };
-
+        // 익명 인증 처리
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 statusText.textContent = "서버 연결됨";
                 statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
                 submitBtn.disabled = false;
             } else {
-                initAuth();
+                signInAnonymously(auth).catch(console.error);
             }
         });
 
-        // 캔버스 크기 및 드로잉 설정
+        // 캔버스 크기 및 스타일 설정
         function resize() {
             const r = window.devicePixelRatio || 1;
-            canvas.width = container.offsetWidth * r;
-            canvas.height = container.offsetHeight * r;
+            const rect = container.getBoundingClientRect();
+            canvas.width = rect.width * r;
+            canvas.height = rect.height * r;
             ctx.scale(r, r);
+            resetCtxStyles();
+        }
+
+        function resetCtxStyles() {
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4;
             ctx.strokeStyle = '#000000';
         }
+
         window.addEventListener('load', resize);
         window.addEventListener('resize', resize);
 
@@ -143,13 +136,18 @@
 
         const start = (e) => {
             isDrawing = true;
+            resetCtxStyles();
             const p = getPos(e);
             [lastX, lastY] = [p.x, p.y];
+            
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fill();
         };
 
         const draw = (e) => {
             if (!isDrawing) return;
-            if (e.cancelable) e.preventDefault(); // 모바일 스크롤 방지
+            if (e.cancelable) e.preventDefault(); // 스크롤 방지
             const p = getPos(e);
             ctx.beginPath();
             ctx.moveTo(lastX, lastY);
@@ -160,35 +158,33 @@
 
         const stop = () => isDrawing = false;
 
-        // 터치 및 마우스 이벤트 통합
-        canvas.addEventListener('touchstart', start, {passive: false});
-        canvas.addEventListener('touchmove', draw, {passive: false});
+        // 터치 및 마우스 이벤트 연결
+        canvas.addEventListener('touchstart', start, { passive: false });
+        canvas.addEventListener('touchmove', draw, { passive: false });
         canvas.addEventListener('touchend', stop);
         canvas.addEventListener('mousedown', start);
         canvas.addEventListener('mousemove', draw);
         window.addEventListener('mouseup', stop);
 
-        // 지우기 기능
-        document.getElementById('clear-btn').onclick = () => ctx.clearRect(0,0,canvas.width,canvas.height);
+        document.getElementById('clear-btn').onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 제출 처리
+        // 제출 버튼 클릭
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
             if (!name) return alert("성함을 입력해 주세요.");
 
             const blank = document.createElement('canvas');
             blank.width = canvas.width; blank.height = canvas.height;
-            // 캔버스가 비어있는지 체크
-            if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 먼저 그려주세요.");
+            if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 그려주세요.");
 
-            if (!auth.currentUser) return alert("연결 중입니다. 잠시만 기다려주세요.");
+            if (!auth.currentUser) return alert("서버와 연결 중입니다.");
 
             setLoading(true);
 
             try {
                 const dataURL = canvas.toDataURL('image/png');
                 
-                // Firestore 업로드
+                // Firestore 데이터 추가
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
                     name: name,
                     image: dataURL,
@@ -196,18 +192,17 @@
                     uid: auth.currentUser.uid
                 });
 
-                // 스마트폰에 파일로 즉시 저장 (이름 포함)
+                // 사용자 기기에 이미지 저장 시도
                 const link = document.createElement('a');
                 link.download = `서명_${name}.png`;
                 link.href = dataURL;
                 link.click();
 
                 alert("성공적으로 제출되었습니다!");
-                ctx.clearRect(0,0,canvas.width,canvas.height);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 userNameInput.value = "";
             } catch (e) {
-                console.error(e);
-                alert("제출 실패: " + e.message);
+                alert("제출 오류가 발생했습니다.");
             } finally {
                 setLoading(false);
             }
