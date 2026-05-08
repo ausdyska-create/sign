@@ -6,7 +6,7 @@
     <title>전자서명 제출</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 모바일 터치 최적화 및 스크롤 방지 */
+        /* 카카오톡 인앱 브라우저 스크롤 및 바운스 완전 차단 */
         html, body { 
             position: fixed; 
             overflow: hidden; 
@@ -16,25 +16,31 @@
             -webkit-user-select: none;
             user-select: none;
             overscroll-behavior: none;
+            background-color: #f8fafc;
         }
+        
+        /* 캔버스 영역 최적화 */
+        #canvas-container {
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         canvas { 
             touch-action: none; 
             cursor: crosshair; 
             background-color: white;
-            -webkit-tap-highlight-color: transparent;
             display: block;
         }
-        input::placeholder {
-            color: #cbd5e1;
-        }
+
+        input::placeholder { color: #cbd5e1; }
     </style>
 </head>
-<body class="bg-slate-50 flex flex-col items-center justify-center p-4">
+<body class="flex flex-col items-center justify-center p-4">
 
     <div class="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200">
-        <!-- 서버 연결 상태 표시 -->
+        <!-- 상단 상태 바 -->
         <div id="connection-status" class="bg-slate-100 px-4 py-2 text-[10px] font-bold text-slate-400 flex items-center justify-center gap-2">
-            <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-300 transition-colors"></span>
+            <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-300"></span>
             <span id="status-text">서버 연결 확인 중...</span>
         </div>
 
@@ -44,26 +50,25 @@
         </div>
 
         <div class="px-8 pb-8 space-y-5">
-            <!-- 작성자 성명 입력란 -->
+            <!-- 성명 입력란 -->
             <div>
                 <label class="block text-[11px] font-black text-slate-400 mb-2 uppercase ml-1 tracking-wider">작성자 성명</label>
                 <input type="text" id="user-name" placeholder="예: 홍길동" 
                     class="w-full px-5 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none transition-all font-bold text-slate-700 shadow-inner">
             </div>
 
-            <!-- 서명 캔버스 -->
+            <!-- 서명 영역 -->
             <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-3xl border-2 border-slate-100 overflow-hidden shadow-inner">
                 <canvas id="signature-pad" class="w-full h-full"></canvas>
-                <!-- 서명 가이드 라인 -->
                 <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
             </div>
 
-            <!-- 하단 버튼 레이아웃: 왼쪽(지우기), 오른쪽(제출) -->
+            <!-- 하단 버튼 레이아웃 -->
             <div class="grid grid-cols-2 gap-3">
                 <button id="clear-btn" class="py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-all text-sm">
                     전체 지우기
                 </button>
-                <button id="submit-btn" disabled class="py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 disabled:shadow-none transition-all flex justify-center items-center gap-2 text-sm">
+                <button id="submit-btn" disabled class="py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 transition-all flex justify-center items-center gap-2 text-sm">
                     <span id="btn-text">제출하기</span>
                     <div id="loader" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                 </button>
@@ -71,12 +76,16 @@
         </div>
     </div>
 
+    <!-- 카카오톡 브라우저 대응 안내 (선택사항) -->
+    <p id="kakao-guide" class="hidden mt-6 text-[10px] text-slate-400 text-center leading-relaxed">
+        서명이 안 될 경우, 우측 상단 메뉴(⋮)에서<br>'다른 브라우저로 열기'를 선택해 주세요.
+    </p>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase 설정 로드
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -85,7 +94,7 @@
 
         const canvas = document.getElementById('signature-pad');
         const container = document.getElementById('canvas-container');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { desynchronized: true });
         const userNameInput = document.getElementById('user-name');
         const submitBtn = document.getElementById('submit-btn');
         const loader = document.getElementById('loader');
@@ -96,7 +105,11 @@
         let isDrawing = false;
         let lastX = 0, lastY = 0;
 
-        // 익명 인증 처리
+        // 카카오톡 브라우저 감지 및 가이드 표시
+        if (/KAKAOTALK/i.test(navigator.userAgent)) {
+            document.getElementById('kakao-guide').classList.remove('hidden');
+        }
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 statusText.textContent = "서버 연결됨";
@@ -107,17 +120,16 @@
             }
         });
 
-        // 캔버스 크기 및 스타일 설정
         function resize() {
             const r = window.devicePixelRatio || 1;
             const rect = container.getBoundingClientRect();
             canvas.width = rect.width * r;
             canvas.height = rect.height * r;
             ctx.scale(r, r);
-            resetCtxStyles();
+            setupCanvas();
         }
 
-        function resetCtxStyles() {
+        function setupCanvas() {
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4;
@@ -130,30 +142,34 @@
 
         const getPos = (e) => {
             const rect = canvas.getBoundingClientRect();
+            // PointerEvent나 TouchEvent에서 좌표 추출
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
             return {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
+                x: clientX - rect.left,
+                y: clientY - rect.top
             };
         };
 
-        // Pointer Events 통합 핸들러 (모바일/PC 공용)
-        const handlePointerDown = (e) => {
-            // 캔버스 자체의 터치 동작 방지
-            if (e.pointerType === 'touch') canvas.style.touchAction = 'none';
+        // 카카오톡 브라우저 핵심 해결책: 모든 터치 이벤트를 강제로 가로채고 기본 동작 차단
+        const handleStart = (e) => {
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
             
             isDrawing = true;
-            resetCtxStyles();
+            setupCanvas();
             const p = getPos(e);
             [lastX, lastY] = [p.x, p.y];
             
-            // 점 찍기
             ctx.beginPath();
             ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
             ctx.fill();
         };
 
-        const handlePointerMove = (e) => {
+        const handleMove = (e) => {
             if (!isDrawing) return;
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
             
             const p = getPos(e);
             ctx.beginPath();
@@ -163,53 +179,49 @@
             [lastX, lastY] = [p.x, p.y];
         };
 
-        const handlePointerUp = () => {
+        const handleEnd = (e) => {
             isDrawing = false;
         };
 
-        // Pointer Events 연결 (가장 강력한 터치 지원)
-        canvas.addEventListener('pointerdown', handlePointerDown);
-        canvas.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-        window.addEventListener('pointercancel', handlePointerUp);
+        // Pointer Events (최신 표준) + Touch Events (레거시/인앱 브라우저용) 둘 다 연결
+        canvas.addEventListener('pointerdown', handleStart, { passive: false });
+        canvas.addEventListener('pointermove', handleMove, { passive: false });
+        window.addEventListener('pointerup', handleEnd);
+
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
 
         document.getElementById('clear-btn').onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 제출 버튼 클릭
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
             if (!name) return alert("성함을 입력해 주세요.");
-
             const blank = document.createElement('canvas');
             blank.width = canvas.width; blank.height = canvas.height;
             if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 그려주세요.");
-
-            if (!auth.currentUser) return alert("서버와 연결 중입니다.");
-
+            
             setLoading(true);
-
             try {
                 const dataURL = canvas.toDataURL('image/png');
-                
-                // Firestore 데이터 추가
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
                     name: name,
                     image: dataURL,
                     timestamp: serverTimestamp(),
                     uid: auth.currentUser.uid
                 });
-
-                // 사용자 기기에 이미지 저장 시도
+                
+                // 다운로드 시도
                 const link = document.createElement('a');
                 link.download = `서명_${name}.png`;
                 link.href = dataURL;
                 link.click();
-
-                alert("성공적으로 제출되었습니다!");
+                
+                alert("제출되었습니다!");
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 userNameInput.value = "";
             } catch (e) {
-                alert("제출 오류가 발생했습니다.");
+                alert("제출 중 오류 발생");
             } finally {
                 setLoading(false);
             }
