@@ -6,41 +6,85 @@
     <title>서명 관리자 패널</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 카드 호버 시 삭제 버튼 표시 */
         .sig-card:hover .delete-btn { opacity: 1; }
         body { overscroll-behavior-y: contain; background-color: #f8fafc; }
+        
+        /* 자체 커스텀 알림창 (Toast) */
+        #custom-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #1e293b;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 999px;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 9999;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease, top 0.3s ease;
+        }
+        #custom-toast.show {
+            top: 40px;
+            opacity: 1;
+        }
+
+        /* 커스텀 모달 (Confirm 창 대체) */
+        #confirm-modal {
+            transition: opacity 0.2s ease;
+        }
+        #confirm-modal.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body class="min-h-screen font-sans">
 
+    <!-- 커스텀 알림창 -->
+    <div id="custom-toast">메시지</div>
+
+    <!-- 커스텀 확인 모달 -->
+    <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl transform transition-all">
+            <h3 class="text-xl font-black text-slate-800 mb-2">확인</h3>
+            <p id="confirm-msg" class="text-slate-500 font-medium mb-8">정말 실행하시겠습니까?</p>
+            <div class="flex gap-3">
+                <button id="confirm-cancel" class="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+                <button id="confirm-ok" class="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-colors">확인</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 상단 내비게이션 -->
-    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4 flex justify-between items-center shadow-sm">
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-40 px-6 py-4 flex justify-between items-center shadow-sm">
         <h1 class="text-xl font-black text-slate-800 flex items-center gap-2">
-            <span>📋</span> 서명 수집 관리 시스템
+            <span>📋</span> 서명 수집 관리
         </h1>
         <div id="count-badge" class="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-bold tracking-tight shadow-md">0건 수집됨</div>
     </nav>
 
     <main class="max-w-6xl mx-auto p-6 sm:p-10">
-        <!-- 상단 컨트롤러: 검색 및 일괄 다운로드 -->
         <div class="flex flex-col sm:flex-row gap-4 mb-10">
             <div class="relative flex-1">
                 <span class="absolute inset-y-0 left-5 flex items-center text-slate-400">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 </span>
-                <input type="text" id="search-input" placeholder="학생 이름으로 검색..." 
+                <input type="text" id="search-input" placeholder="이름으로 검색..." 
                     class="w-full pl-14 pr-6 py-4 rounded-2xl border-none shadow-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium transition-all text-slate-700">
             </div>
-            <button id="download-all-btn" class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-xl hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-2">
+            <button id="download-all-btn" class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-2">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                전체 서명 내려받기
+                모든 이미지 내려받기
             </button>
         </div>
 
-        <!-- 서명 데이터 그리드 -->
         <div id="signature-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
             <div id="status-area" class="col-span-full py-20 text-slate-400 text-center font-medium">
-                서버 연결 및 데이터를 불러오는 중입니다...
+                서버 연결 및 인증을 확인하는 중입니다...
             </div>
         </div>
     </main>
@@ -50,7 +94,6 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, query, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase 설정 (환경 변수로부터 로드)
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -60,7 +103,36 @@
         let allData = [];
         let unsubscribe = null;
 
-        // 인증 처리 (RULE 3 준수)
+        // 자체 알림창 및 모달 로직
+        function showToast(message) {
+            const toast = document.getElementById('custom-toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function showConfirm(message) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirm-modal');
+                const msgEl = document.getElementById('confirm-msg');
+                const btnOk = document.getElementById('confirm-ok');
+                const btnCancel = document.getElementById('confirm-cancel');
+
+                msgEl.textContent = message;
+                modal.classList.remove('hidden');
+
+                const cleanup = () => {
+                    modal.classList.add('hidden');
+                    btnOk.onclick = null;
+                    btnCancel.onclick = null;
+                };
+
+                btnOk.onclick = () => { cleanup(); resolve(true); };
+                btnCancel.onclick = () => { cleanup(); resolve(false); };
+            });
+        }
+
+        // 인증 프로세스 (에러 최소화)
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -70,11 +142,10 @@
                 }
             } catch (error) {
                 console.error("인증 실패:", error);
-                document.getElementById('status-area').textContent = "인증 오류가 발생했습니다. 권한 설정을 확인해 주세요.";
+                document.getElementById('status-area').textContent = "인증 오류 발생. 권한을 확인해주세요.";
             }
         };
 
-        // 인증 상태 확인 후 실시간 리스너 시작
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 startListening();
@@ -86,24 +157,21 @@
         function startListening() {
             if (unsubscribe) unsubscribe();
             
-            // 데이터 경로 (RULE 1 준수)
-            const signaturesRef = collection(db, 'artifacts', appId, 'public', 'data', 'signatures');
-            const q = query(signaturesRef); // 단순 쿼리만 사용 (RULE 2 준수)
+            // 데이터 구독
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'));
 
             unsubscribe = onSnapshot(q, (snap) => {
                 allData = [];
-                snap.forEach(d => {
-                    allData.push({ id: d.id, ...d.data() });
-                });
+                snap.forEach(d => allData.push({ id: d.id, ...d.data() }));
                 
-                // 최신순 정렬 (서버 인덱스 에러 방지를 위해 클라이언트 메모리에서 처리)
+                // 최신 제출순으로 메모리 정렬
                 allData.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 
                 render();
             }, (error) => {
                 console.error("Firestore Error:", error);
                 if (error.code === 'permission-denied') {
-                    document.getElementById('status-area').textContent = "접근 권한이 없습니다. 관리자 로그인이 필요합니다.";
+                    document.getElementById('status-area').textContent = "데이터 접근 권한이 없습니다.";
                 }
             });
         }
@@ -116,7 +184,7 @@
             document.getElementById('count-badge').textContent = `${filtered.length}건 수집됨`;
 
             if (allData.length === 0) {
-                grid.innerHTML = `<div class="col-span-full py-20 text-slate-400 text-center font-medium border-2 border-dashed border-slate-200 rounded-[3rem]">아직 제출된 서명이 없습니다.</div>`;
+                grid.innerHTML = `<div class="col-span-full py-20 text-slate-400 text-center font-medium border-2 border-dashed border-slate-200 rounded-[3rem]">제출된 서명이 없습니다.</div>`;
                 return;
             }
 
@@ -126,18 +194,18 @@
             }
 
             grid.innerHTML = filtered.map(d => `
-                <div class="sig-card bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-2xl transition-all relative group overflow-hidden text-left">
+                <div class="sig-card bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-2xl transition-all relative group overflow-hidden text-left">
                     <div class="flex justify-between items-start mb-4">
                         <div class="pr-8">
                             <span class="font-black text-slate-800 text-lg block leading-tight truncate">${d.name || '이름 없음'}</span>
-                            <span class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mt-1 block">${formatDate(d.timestamp)}</span>
+                            <span class="text-[10px] text-slate-400 font-bold mt-1 block uppercase tracking-tighter">${formatDate(d.timestamp)}</span>
                         </div>
                         <button onclick="deleteDocById('${d.id}')" class="delete-btn sm:opacity-0 text-slate-300 hover:text-rose-500 transition-all p-2 rounded-full hover:bg-rose-50 flex-shrink-0">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                     </div>
-                    <div class="bg-slate-50 rounded-3xl p-4 aspect-video flex items-center justify-center border border-slate-50 mb-4 overflow-hidden shadow-inner">
-                        <img src="${d.image}" class="max-w-full max-h-full object-contain filter drop-shadow-md" loading="lazy" alt="서명">
+                    <div class="bg-slate-50 rounded-2xl p-4 aspect-video flex items-center justify-center border border-slate-50 mb-4 overflow-hidden shadow-inner">
+                        <img src="${d.image}" class="max-w-full max-h-full object-contain filter drop-shadow-md" loading="lazy">
                     </div>
                     <a href="${d.image}" download="서명_${d.name || '알수없음'}.png" class="inline-block w-full py-3 bg-slate-50 text-slate-500 hover:bg-indigo-600 hover:text-white rounded-xl text-xs font-black transition-all text-center">
                         이미지 개별 저장
@@ -152,30 +220,39 @@
             return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
+        // 자체 확인 모달을 이용한 삭제 기능
         window.deleteDocById = async (id) => {
-            if (!confirm("이 서명 데이터를 삭제하시겠습니까?")) return;
+            const confirmed = await showConfirm("이 데이터를 영구적으로 삭제하시겠습니까?");
+            if (!confirmed) return;
+            
             try {
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'signatures', id));
-            } catch (e) {
-                alert("삭제 권한이 없습니다.");
+                showToast("성공적으로 삭제되었습니다.");
+            } catch (e) { 
+                showToast("삭제 실패: 권한이 부족합니다."); 
             }
         };
 
-        document.getElementById('download-all-btn').onclick = () => {
-            if (allData.length === 0) return alert("데이터가 없습니다.");
-            if (!confirm(`${allData.length}개의 파일을 한꺼번에 다운로드하시겠습니까?\n브라우저의 다중 다운로드 권한을 허용해 주세요.`)) return;
-
+        // 자체 확인 모달을 이용한 일괄 다운로드
+        document.getElementById('download-all-btn').onclick = async () => {
+            if (allData.length === 0) return showToast("수집된 데이터가 없습니다.");
+            
+            const confirmed = await showConfirm(`${allData.length}개의 파일을 일괄 다운로드하시겠습니까?`);
+            if (!confirmed) return;
+            
+            showToast("다운로드를 시작합니다...");
+            
             allData.forEach((d, i) => {
                 setTimeout(() => {
                     const a = document.createElement('a');
-                    a.href = d.image;
-                    a.download = `서명_${d.name || (allData.length - i)}.png`;
+                    a.href = d.image; 
+                    a.download = `서명_${d.name || (allData.length - i)}.png`; 
                     a.click();
-                }, i * 400); // 팝업 차단 방지를 위한 시간차 다운로드
+                }, i * 400); // 브라우저 차단 방지를 위한 시간차
             });
         };
 
-        // 검색어 입력 시 즉시 필터링
+        // 실시간 검색
         document.getElementById('search-input').oninput = render;
     </script>
 </body>
