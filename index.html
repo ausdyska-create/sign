@@ -6,7 +6,7 @@
     <title>전자서명 제출</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 카카오톡 인앱 브라우저 스크롤 및 바운스 완전 차단 */
+        /* [핵심] 브라우저의 모든 제스처(새로고침, 뒤로가기)를 원천 차단 */
         html, body { 
             position: fixed; 
             overflow: hidden; 
@@ -19,10 +19,10 @@
             background-color: #f8fafc;
         }
         
-        /* 캔버스 영역 최적화 */
         #canvas-container {
             touch-action: none;
             -webkit-tap-highlight-color: transparent;
+            user-select: none;
         }
 
         canvas { 
@@ -30,6 +30,8 @@
             cursor: crosshair; 
             background-color: white;
             display: block;
+            width: 100%;
+            height: 100%;
         }
 
         input::placeholder { color: #cbd5e1; }
@@ -59,8 +61,14 @@
 
             <!-- 서명 영역 -->
             <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-3xl border-2 border-slate-100 overflow-hidden shadow-inner">
-                <canvas id="signature-pad" class="w-full h-full"></canvas>
-                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
+                <canvas id="signature-pad"></canvas>
+                
+                <!-- 안내 문구 추가 -->
+                <div id="guide-text" class="absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300">
+                    <span class="text-slate-200 text-xl font-bold tracking-widest">여기에 서명해 주세요</span>
+                </div>
+                
+                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-100 pointer-events-none"></div>
             </div>
 
             <!-- 하단 버튼 레이아웃 -->
@@ -76,11 +84,6 @@
         </div>
     </div>
 
-    <!-- 카카오톡 브라우저 대응 안내 (선택사항) -->
-    <p id="kakao-guide" class="hidden mt-6 text-[10px] text-slate-400 text-center leading-relaxed">
-        서명이 안 될 경우, 우측 상단 메뉴(⋮)에서<br>'다른 브라우저로 열기'를 선택해 주세요.
-    </p>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -94,6 +97,7 @@
 
         const canvas = document.getElementById('signature-pad');
         const container = document.getElementById('canvas-container');
+        const guideText = document.getElementById('guide-text');
         const ctx = canvas.getContext('2d', { desynchronized: true });
         const userNameInput = document.getElementById('user-name');
         const submitBtn = document.getElementById('submit-btn');
@@ -105,31 +109,30 @@
         let isDrawing = false;
         let lastX = 0, lastY = 0;
 
-        // 카카오톡 브라우저 감지 및 가이드 표시
-        if (/KAKAOTALK/i.test(navigator.userAgent)) {
-            document.getElementById('kakao-guide').classList.remove('hidden');
-        }
-
+        // 서버 연결 체크
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 statusText.textContent = "서버 연결됨";
                 statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
                 submitBtn.disabled = false;
             } else {
-                signInAnonymously(auth).catch(console.error);
+                signInAnonymously(auth).catch(() => {
+                    statusText.textContent = "연결 지연 중...";
+                });
             }
         });
 
+        // 캔버스 크기 및 스타일 최적화
         function resize() {
             const r = window.devicePixelRatio || 1;
             const rect = container.getBoundingClientRect();
             canvas.width = rect.width * r;
             canvas.height = rect.height * r;
             ctx.scale(r, r);
-            setupCanvas();
+            setupCanvasStyles();
         }
 
-        function setupCanvas() {
+        function setupCanvasStyles() {
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4;
@@ -140,24 +143,37 @@
         window.addEventListener('load', resize);
         window.addEventListener('resize', resize);
 
+        // 정밀 좌표 계산
         const getPos = (e) => {
             const rect = canvas.getBoundingClientRect();
-            // PointerEvent나 TouchEvent에서 좌표 추출
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            let clientX, clientY;
+            
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            
             return {
                 x: clientX - rect.left,
                 y: clientY - rect.top
             };
         };
 
-        // 카카오톡 브라우저 핵심 해결책: 모든 터치 이벤트를 강제로 가로채고 기본 동작 차단
-        const handleStart = (e) => {
-            e.stopPropagation();
+        // [핵심] 터치 및 포인터 이벤트 핸들러
+        const startDrawing = (e) => {
+            // 브라우저의 기본 동작(스크롤, 제스처)을 강력하게 차단
             if (e.cancelable) e.preventDefault();
+            e.stopImmediatePropagation();
             
             isDrawing = true;
-            setupCanvas();
+            
+            // 서명 시작 시 안내 문구 숨기기
+            guideText.style.opacity = '0';
+            
+            setupCanvasStyles();
             const p = getPos(e);
             [lastX, lastY] = [p.x, p.y];
             
@@ -166,10 +182,10 @@
             ctx.fill();
         };
 
-        const handleMove = (e) => {
+        const moveDrawing = (e) => {
             if (!isDrawing) return;
-            e.stopPropagation();
             if (e.cancelable) e.preventDefault();
+            e.stopImmediatePropagation();
             
             const p = getPos(e);
             ctx.beginPath();
@@ -179,49 +195,63 @@
             [lastX, lastY] = [p.x, p.y];
         };
 
-        const handleEnd = (e) => {
-            isDrawing = false;
+        const stopDrawing = (e) => {
+            if (isDrawing) {
+                isDrawing = false;
+                ctx.closePath();
+            }
         };
 
-        // Pointer Events (최신 표준) + Touch Events (레거시/인앱 브라우저용) 둘 다 연결
-        canvas.addEventListener('pointerdown', handleStart, { passive: false });
-        canvas.addEventListener('pointermove', handleMove, { passive: false });
-        window.addEventListener('pointerup', handleEnd);
+        // 이벤트 리스너 연결
+        canvas.addEventListener('touchstart', startDrawing, { passive: false });
+        canvas.addEventListener('touchmove', moveDrawing, { passive: false });
+        window.addEventListener('touchend', stopDrawing);
 
-        canvas.addEventListener('touchstart', handleStart, { passive: false });
-        canvas.addEventListener('touchmove', handleMove, { passive: false });
-        window.addEventListener('touchend', handleEnd);
+        canvas.addEventListener('pointerdown', startDrawing, { passive: false });
+        canvas.addEventListener('pointermove', moveDrawing, { passive: false });
+        window.addEventListener('pointerup', stopDrawing);
 
-        document.getElementById('clear-btn').onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // 지우기
+        document.getElementById('clear-btn').onclick = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            guideText.style.opacity = '1'; // 지우면 다시 안내 문구 보이기
+        };
 
+        // 제출 로직
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
-            if (!name) return alert("성함을 입력해 주세요.");
+            if (!name) return alert("성함을 먼저 입력해 주세요.");
+
             const blank = document.createElement('canvas');
             blank.width = canvas.width; blank.height = canvas.height;
             if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 그려주세요.");
-            
+
+            if (!auth.currentUser) return alert("서버와 연결 중입니다. 잠시만 기다려 주세요.");
+
             setLoading(true);
+
             try {
                 const dataURL = canvas.toDataURL('image/png');
+                
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
                     name: name,
                     image: dataURL,
                     timestamp: serverTimestamp(),
                     uid: auth.currentUser.uid
                 });
-                
-                // 다운로드 시도
+
                 const link = document.createElement('a');
                 link.download = `서명_${name}.png`;
                 link.href = dataURL;
                 link.click();
-                
-                alert("제출되었습니다!");
+
+                alert("서명이 성공적으로 제출되었습니다!");
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
+                guideText.style.opacity = '1';
                 userNameInput.value = "";
             } catch (e) {
-                alert("제출 중 오류 발생");
+                console.error(e);
+                alert("제출 오류 발생");
             } finally {
                 setLoading(false);
             }
