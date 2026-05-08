@@ -4,40 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>전자서명 제출</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- [초강력 해결책] 글로벌 표준 전자서명 라이브러리 (터치 씹힘 100% 해결) -->
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+
     <style>
-        /* 모바일 브라우저의 모든 제스처, 바운스, 스크롤 완벽 차단 */
+        /* 모바일 브라우저 튕김, 당겨서 새로고침 완벽 차단 */
         html, body { 
             position: fixed; 
             overflow: hidden; 
             width: 100%; 
             height: 100%; 
-            margin: 0;
-            padding: 0;
+            margin: 0; padding: 0;
             touch-action: none; 
-            -webkit-user-select: none;
-            user-select: none;
+            -webkit-user-select: none; user-select: none;
             overscroll-behavior: none;
             background-color: #f8fafc;
         }
-        
-        #canvas-container {
-            touch-action: none;
-            -webkit-tap-highlight-color: transparent;
-        }
 
-        canvas { 
-            touch-action: none; 
-            cursor: crosshair; 
-            background-color: white;
-            display: block;
-            width: 100%;
-            height: 100%;
+        /* 캔버스 자체의 터치 동작을 막아 라이브러리가 독점하도록 설정 */
+        canvas {
+            touch-action: none !important;
+            cursor: crosshair;
         }
 
         input::placeholder { color: #cbd5e1; }
 
-        /* 자체 커스텀 알림창(토스트) */
+        /* 커스텀 알림창 (카카오톡 alert 무시 현상 방지) */
         #custom-toast {
             position: fixed;
             top: 20px;
@@ -46,7 +40,7 @@
             background-color: #1e293b;
             color: white;
             padding: 16px 24px;
-            border-radius: 999px;
+            border-radius: 99px;
             font-weight: bold;
             font-size: 14px;
             z-index: 9999;
@@ -55,10 +49,7 @@
             pointer-events: none;
             transition: opacity 0.3s ease, top 0.3s ease;
         }
-        #custom-toast.show {
-            top: 40px;
-            opacity: 1;
-        }
+        #custom-toast.show { top: 40px; opacity: 1; }
     </style>
 </head>
 <body class="flex flex-col items-center justify-center p-4">
@@ -86,16 +77,16 @@
                     class="w-full px-5 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none transition-all font-bold text-slate-700 shadow-inner">
             </div>
 
-            <!-- 서명 영역 -->
+            <!-- 서명 영역 (라이브러리 전용) -->
             <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-3xl border-2 border-slate-100 overflow-hidden shadow-inner">
-                <canvas id="signature-pad"></canvas>
+                <canvas id="signature-pad" class="w-full h-full absolute inset-0"></canvas>
                 
                 <!-- 안내 문구 -->
                 <div id="guide-text" class="absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300">
                     <span class="text-slate-300 text-lg font-black tracking-widest">여기에 서명해 주세요</span>
                 </div>
                 
-                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
+                <div class="absolute bottom-10 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
             </div>
 
             <!-- 하단 버튼 레이아웃 -->
@@ -103,7 +94,7 @@
                 <button id="clear-btn" class="py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-all text-sm">
                     전체 지우기
                 </button>
-                <button id="submit-btn" disabled class="py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 transition-all flex justify-center items-center gap-2 text-sm">
+                <button id="submit-btn" disabled class="py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-95 disabled:bg-slate-200 disabled:shadow-none transition-all flex justify-center items-center gap-2 text-sm">
                     <span id="btn-text">제출하기</span>
                     <div id="loader" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                 </button>
@@ -116,36 +107,32 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // Firebase 설정
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'sign-collector';
 
+        // UI 요소
         const canvas = document.getElementById('signature-pad');
-        const container = document.getElementById('canvas-container');
         const guideText = document.getElementById('guide-text');
-        const ctx = canvas.getContext('2d');
         const userNameInput = document.getElementById('user-name');
         const submitBtn = document.getElementById('submit-btn');
         const loader = document.getElementById('loader');
         const btnText = document.getElementById('btn-text');
         const statusText = document.getElementById('status-text');
         const statusDot = document.getElementById('status-dot');
-        
-        let isDrawing = false;
-        let lastX = 0, lastY = 0;
 
-        // 자체 알림창 함수 (alert 대체)
+        // 자체 알림창
         function showToast(message) {
             const toast = document.getElementById('custom-toast');
             toast.textContent = message;
             toast.classList.add('show');
-            setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3000);
+            setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
+        // 서버 연결
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 statusText.textContent = "서버 연결됨";
@@ -159,115 +146,60 @@
             }
         });
 
-        // 캔버스 사이즈 완벽 매칭 로직
+        // ----------------------------------------------------
+        // [핵심 해결 영역] 전문 서명 라이브러리 (SignaturePad) 초기화
+        // ----------------------------------------------------
+        const signaturePad = new window.SignaturePad(canvas, {
+            minWidth: 1.5,
+            maxWidth: 4.5,
+            penColor: "rgb(0, 0, 0)",
+            backgroundColor: "rgb(255, 255, 255)"
+        });
+
+        // 선을 긋기 시작하면 안내 문구 숨기기
+        signaturePad.addEventListener("beginStroke", () => {
+            guideText.style.display = 'none';
+        });
+
+        // 화면 크기에 맞춰 캔버스 화질 및 좌표 영점 조절 (오차 방지)
         function resizeCanvas() {
-            const rect = container.getBoundingClientRect();
             const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            // 캔버스의 실제 크기를 해상도에 맞춰 뻥튀기 후 스케일 조정
+            canvas.width = canvas.offsetWidth * ratio;
+            canvas.height = canvas.offsetHeight * ratio;
+            canvas.getContext("2d").scale(ratio, ratio);
             
-            canvas.width = rect.width * ratio;
-            canvas.height = rect.height * ratio;
-            canvas.style.width = rect.width + 'px';
-            canvas.style.height = rect.height + 'px';
-            
-            ctx.scale(ratio, ratio);
-            
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = '#000000';
-            ctx.fillStyle = '#000000';
+            // 리사이즈 후에는 항상 캔버스를 비워주어야 오동작하지 않음
+            signaturePad.clear();
+            guideText.style.display = 'flex';
         }
 
-        window.addEventListener('load', resizeCanvas);
-        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener("resize", resizeCanvas);
+        // 페이지 렌더링이 끝난 직후 크기 조절 실행
+        setTimeout(resizeCanvas, 100);
+        // ----------------------------------------------------
 
-        // 좌표 추출 함수 (터치 & 마우스 완벽 분리)
-        function getCoordinates(e) {
-            const rect = canvas.getBoundingClientRect();
-            let clientX, clientY;
-
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            } else {
-                clientX = e.clientX;
-                clientY = e.clientY;
-            }
-
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
-            };
-        }
-
-        // 그리기 시작
-        function startDrawing(e) {
-            if (e.cancelable) e.preventDefault(); // 기본 동작 완벽 차단
-            
-            isDrawing = true;
-            guideText.style.display = 'none'; // 가이드 문구 아예 DOM에서 숨김 처리
-            
-            const coords = getCoordinates(e);
-            lastX = coords.x;
-            lastY = coords.y;
-            
-            ctx.beginPath();
-            ctx.arc(lastX, lastY, ctx.lineWidth / 2, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // 그리기 중
-        function draw(e) {
-            if (!isDrawing) return;
-            if (e.cancelable) e.preventDefault(); // 스크롤 등 차단
-            
-            const coords = getCoordinates(e);
-            
-            ctx.beginPath();
-            ctx.moveTo(lastX, lastY);
-            ctx.lineTo(coords.x, coords.y);
-            ctx.stroke();
-            
-            lastX = coords.x;
-            lastY = coords.y;
-        }
-
-        // 그리기 종료
-        function stopDrawing(e) {
-            if (e && e.cancelable) e.preventDefault();
-            isDrawing = false;
-            ctx.closePath();
-        }
-
-        // [핵심] 순수 Touch Events (모바일 전용)
-        canvas.addEventListener('touchstart', startDrawing, { passive: false });
-        canvas.addEventListener('touchmove', draw, { passive: false });
-        canvas.addEventListener('touchend', stopDrawing, { passive: false });
-        canvas.addEventListener('touchcancel', stopDrawing, { passive: false });
-
-        // [핵심] 순수 Mouse Events (PC 전용)
-        canvas.addEventListener('mousedown', startDrawing);
-        canvas.addEventListener('mousemove', draw);
-        window.addEventListener('mouseup', stopDrawing);
-
-        // 전체 지우기
+        // 지우기 버튼
         document.getElementById('clear-btn').onclick = () => {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            guideText.style.display = 'flex'; // 안내 문구 다시 보이기
+            signaturePad.clear();
+            guideText.style.display = 'flex';
         };
 
-        // 제출하기
+        // 제출 버튼 로직
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
             if (!name) return showToast("작성자 성함을 입력해 주세요.");
             
-            const blank = document.createElement('canvas');
-            blank.width = canvas.width; blank.height = canvas.height;
-            if (canvas.toDataURL() === blank.toDataURL()) return showToast("서명을 먼저 진행해 주세요.");
+            // 라이브러리의 isEmpty() 기능으로 서명 여부 완벽 감지
+            if (signaturePad.isEmpty()) return showToast("서명을 진행해 주세요.");
             
+            if (!auth.currentUser) return showToast("서버와 연결 중입니다.");
+
             setLoading(true);
             try {
-                const dataURL = canvas.toDataURL('image/png');
+                // 서명 이미지를 배경색상 포함하여 추출
+                const dataURL = signaturePad.toDataURL('image/png');
+                
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
                     name: name, 
                     image: dataURL, 
@@ -275,14 +207,14 @@
                     uid: auth.currentUser.uid
                 });
                 
-                // 이미지 다운로드
+                // 파일 자동 다운로드 (선택사항)
                 const link = document.createElement('a');
                 link.download = `서명_${name}.png`;
                 link.href = dataURL;
                 link.click();
                 
                 showToast("성공적으로 제출되었습니다!");
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                signaturePad.clear();
                 guideText.style.display = 'flex';
                 userNameInput.value = "";
             } catch (e) {
