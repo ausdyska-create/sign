@@ -2,16 +2,18 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>전자서명 제출</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* [핵심] 브라우저의 모든 제스처(새로고침, 뒤로가기)를 원천 차단 */
+        /* 모바일 브라우저의 모든 제스처, 바운스, 스크롤 완벽 차단 */
         html, body { 
             position: fixed; 
             overflow: hidden; 
             width: 100%; 
             height: 100%; 
+            margin: 0;
+            padding: 0;
             touch-action: none; 
             -webkit-user-select: none;
             user-select: none;
@@ -22,7 +24,6 @@
         #canvas-container {
             touch-action: none;
             -webkit-tap-highlight-color: transparent;
-            user-select: none;
         }
 
         canvas { 
@@ -35,12 +36,38 @@
         }
 
         input::placeholder { color: #cbd5e1; }
+
+        /* 자체 커스텀 알림창(토스트) */
+        #custom-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #1e293b;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 999px;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 9999;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease, top 0.3s ease;
+        }
+        #custom-toast.show {
+            top: 40px;
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="flex flex-col items-center justify-center p-4">
 
+    <!-- 커스텀 알림창 -->
+    <div id="custom-toast">메시지</div>
+
     <div class="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200">
-        <!-- 상단 상태 바 -->
+        <!-- 상태 표시 바 -->
         <div id="connection-status" class="bg-slate-100 px-4 py-2 text-[10px] font-bold text-slate-400 flex items-center justify-center gap-2">
             <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-300"></span>
             <span id="status-text">서버 연결 확인 중...</span>
@@ -63,12 +90,12 @@
             <div id="canvas-container" class="relative w-full aspect-[4/3] bg-white rounded-3xl border-2 border-slate-100 overflow-hidden shadow-inner">
                 <canvas id="signature-pad"></canvas>
                 
-                <!-- 안내 문구 추가 -->
+                <!-- 안내 문구 -->
                 <div id="guide-text" class="absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300">
-                    <span class="text-slate-200 text-xl font-bold tracking-widest">여기에 서명해 주세요</span>
+                    <span class="text-slate-300 text-lg font-black tracking-widest">여기에 서명해 주세요</span>
                 </div>
                 
-                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-100 pointer-events-none"></div>
+                <div class="absolute bottom-12 left-8 right-8 border-b-2 border-dashed border-slate-200 pointer-events-none"></div>
             </div>
 
             <!-- 하단 버튼 레이아웃 -->
@@ -98,7 +125,7 @@
         const canvas = document.getElementById('signature-pad');
         const container = document.getElementById('canvas-container');
         const guideText = document.getElementById('guide-text');
-        const ctx = canvas.getContext('2d', { desynchronized: true });
+        const ctx = canvas.getContext('2d');
         const userNameInput = document.getElementById('user-name');
         const submitBtn = document.getElementById('submit-btn');
         const loader = document.getElementById('loader');
@@ -109,7 +136,16 @@
         let isDrawing = false;
         let lastX = 0, lastY = 0;
 
-        // 서버 연결 체크
+        // 자체 알림창 함수 (alert 대체)
+        function showToast(message) {
+            const toast = document.getElementById('custom-toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 statusText.textContent = "서버 연결됨";
@@ -117,22 +153,24 @@
                 submitBtn.disabled = false;
             } else {
                 signInAnonymously(auth).catch(() => {
-                    statusText.textContent = "연결 지연 중...";
+                    statusText.textContent = "연결 오류";
+                    statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
                 });
             }
         });
 
-        // 캔버스 크기 및 스타일 최적화
-        function resize() {
-            const r = window.devicePixelRatio || 1;
+        // 캔버스 사이즈 완벽 매칭 로직
+        function resizeCanvas() {
             const rect = container.getBoundingClientRect();
-            canvas.width = rect.width * r;
-            canvas.height = rect.height * r;
-            ctx.scale(r, r);
-            setupCanvasStyles();
-        }
-
-        function setupCanvasStyles() {
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            
+            canvas.width = rect.width * ratio;
+            canvas.height = rect.height * ratio;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            
+            ctx.scale(ratio, ratio);
+            
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.lineWidth = 4;
@@ -140,14 +178,14 @@
             ctx.fillStyle = '#000000';
         }
 
-        window.addEventListener('load', resize);
-        window.addEventListener('resize', resize);
+        window.addEventListener('load', resizeCanvas);
+        window.addEventListener('resize', resizeCanvas);
 
-        // 정밀 좌표 계산
-        const getPos = (e) => {
+        // 좌표 추출 함수 (터치 & 마우스 완벽 분리)
+        function getCoordinates(e) {
             const rect = canvas.getBoundingClientRect();
             let clientX, clientY;
-            
+
             if (e.touches && e.touches.length > 0) {
                 clientX = e.touches[0].clientX;
                 clientY = e.touches[0].clientY;
@@ -155,103 +193,100 @@
                 clientX = e.clientX;
                 clientY = e.clientY;
             }
-            
+
             return {
                 x: clientX - rect.left,
                 y: clientY - rect.top
             };
-        };
+        }
 
-        // [핵심] 터치 및 포인터 이벤트 핸들러
-        const startDrawing = (e) => {
-            // 브라우저의 기본 동작(스크롤, 제스처)을 강력하게 차단
-            if (e.cancelable) e.preventDefault();
-            e.stopImmediatePropagation();
+        // 그리기 시작
+        function startDrawing(e) {
+            if (e.cancelable) e.preventDefault(); // 기본 동작 완벽 차단
             
             isDrawing = true;
+            guideText.style.display = 'none'; // 가이드 문구 아예 DOM에서 숨김 처리
             
-            // 서명 시작 시 안내 문구 숨기기
-            guideText.style.opacity = '0';
-            
-            setupCanvasStyles();
-            const p = getPos(e);
-            [lastX, lastY] = [p.x, p.y];
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
             
             ctx.beginPath();
-            ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.arc(lastX, lastY, ctx.lineWidth / 2, 0, Math.PI * 2);
             ctx.fill();
-        };
+        }
 
-        const moveDrawing = (e) => {
+        // 그리기 중
+        function draw(e) {
             if (!isDrawing) return;
-            if (e.cancelable) e.preventDefault();
-            e.stopImmediatePropagation();
+            if (e.cancelable) e.preventDefault(); // 스크롤 등 차단
             
-            const p = getPos(e);
+            const coords = getCoordinates(e);
+            
             ctx.beginPath();
             ctx.moveTo(lastX, lastY);
-            ctx.lineTo(p.x, p.y);
+            ctx.lineTo(coords.x, coords.y);
             ctx.stroke();
-            [lastX, lastY] = [p.x, p.y];
-        };
+            
+            lastX = coords.x;
+            lastY = coords.y;
+        }
 
-        const stopDrawing = (e) => {
-            if (isDrawing) {
-                isDrawing = false;
-                ctx.closePath();
-            }
-        };
+        // 그리기 종료
+        function stopDrawing(e) {
+            if (e && e.cancelable) e.preventDefault();
+            isDrawing = false;
+            ctx.closePath();
+        }
 
-        // 이벤트 리스너 연결
+        // [핵심] 순수 Touch Events (모바일 전용)
         canvas.addEventListener('touchstart', startDrawing, { passive: false });
-        canvas.addEventListener('touchmove', moveDrawing, { passive: false });
-        window.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchmove', draw, { passive: false });
+        canvas.addEventListener('touchend', stopDrawing, { passive: false });
+        canvas.addEventListener('touchcancel', stopDrawing, { passive: false });
 
-        canvas.addEventListener('pointerdown', startDrawing, { passive: false });
-        canvas.addEventListener('pointermove', moveDrawing, { passive: false });
-        window.addEventListener('pointerup', stopDrawing);
+        // [핵심] 순수 Mouse Events (PC 전용)
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        window.addEventListener('mouseup', stopDrawing);
 
-        // 지우기
+        // 전체 지우기
         document.getElementById('clear-btn').onclick = () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            guideText.style.opacity = '1'; // 지우면 다시 안내 문구 보이기
+            guideText.style.display = 'flex'; // 안내 문구 다시 보이기
         };
 
-        // 제출 로직
+        // 제출하기
         submitBtn.onclick = async () => {
             const name = userNameInput.value.trim();
-            if (!name) return alert("성함을 먼저 입력해 주세요.");
-
+            if (!name) return showToast("작성자 성함을 입력해 주세요.");
+            
             const blank = document.createElement('canvas');
             blank.width = canvas.width; blank.height = canvas.height;
-            if (canvas.toDataURL() === blank.toDataURL()) return alert("서명을 그려주세요.");
-
-            if (!auth.currentUser) return alert("서버와 연결 중입니다. 잠시만 기다려 주세요.");
-
+            if (canvas.toDataURL() === blank.toDataURL()) return showToast("서명을 먼저 진행해 주세요.");
+            
             setLoading(true);
-
             try {
                 const dataURL = canvas.toDataURL('image/png');
-                
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'signatures'), {
-                    name: name,
-                    image: dataURL,
-                    timestamp: serverTimestamp(),
+                    name: name, 
+                    image: dataURL, 
+                    timestamp: serverTimestamp(), 
                     uid: auth.currentUser.uid
                 });
-
+                
+                // 이미지 다운로드
                 const link = document.createElement('a');
                 link.download = `서명_${name}.png`;
                 link.href = dataURL;
                 link.click();
-
-                alert("서명이 성공적으로 제출되었습니다!");
+                
+                showToast("성공적으로 제출되었습니다!");
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                guideText.style.opacity = '1';
+                guideText.style.display = 'flex';
                 userNameInput.value = "";
             } catch (e) {
-                console.error(e);
-                alert("제출 오류 발생");
+                showToast("제출 중 네트워크 오류가 발생했습니다.");
             } finally {
                 setLoading(false);
             }
@@ -260,7 +295,7 @@
         function setLoading(isLoading) {
             submitBtn.disabled = isLoading;
             loader.classList.toggle('hidden', !isLoading);
-            btnText.textContent = isLoading ? "중..." : "제출하기";
+            btnText.textContent = isLoading ? "제출 중..." : "제출하기";
         }
     </script>
 </body>
